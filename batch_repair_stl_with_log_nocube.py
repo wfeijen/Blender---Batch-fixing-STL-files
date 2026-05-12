@@ -1,107 +1,249 @@
 import bpy
+import bmesh
 import os
 
-# ==== Ordner anpassen ====
-input_folder = "~/data/3D Druck/0 - Fix STL/source"
-output_folder = "~/data/3D Druck/0 - Fix STL/fixed"
+# =========================================================
+# ORDNER ANPASSEN
+# =========================================================
 
-# Logfile anlegen
+input_folder = (
+    "/home/willem/Documents/3d Printen/3D modellen/WH40K/terein/1 ruine/printklaar_stl"
+)
+
+output_folder = (
+    "/home/willem/Documents/3d Printen/3D modellen/WH40K/terein/1 ruine/Print_ready"
+)
+
+# =========================================================
+# OUTPUT ORDNER + LOGFILE
+# =========================================================
+
+os.makedirs(output_folder, exist_ok=True)
+
 log_file = os.path.join(output_folder, "repair_log.txt")
 
-if not os.path.exists(output_folder):
-    os.makedirs(output_folder)
+# =========================================================
+# NON MANIFOLD CHECK
+# =========================================================
+
 
 def has_non_manifold(obj):
-    """Prüfen ob Non-Manifold-Kanten existieren"""
+
     bpy.context.view_layer.objects.active = obj
-    bpy.ops.object.mode_set(mode='EDIT')
-    bpy.ops.mesh.select_all(action='DESELECT')
-    bpy.ops.mesh.select_non_manifold()
-    sel = [v for v in obj.data.vertices if v.select]
-    bpy.ops.object.mode_set(mode='OBJECT')
-    return len(sel)
+
+    bpy.ops.object.mode_set(mode="EDIT")
+
+    bm = bmesh.from_edit_mesh(obj.data)
+
+    non_manifold_edges = [e for e in bm.edges if not e.is_manifold]
+
+    count = len(non_manifold_edges)
+
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+    return count
+
+
+# =========================================================
+# STL REPAIR
+# =========================================================
+
 
 def repair_stl(in_file, out_file, log):
-    # Szene leeren (löscht Default Cube & alte Objekte)
-    bpy.ops.object.select_all(action='SELECT')
+
+    # -----------------------------------------------------
+    # Szene leeren
+    # -----------------------------------------------------
+
+    bpy.ops.object.select_all(action="SELECT")
+
     bpy.ops.object.delete(use_global=False)
 
-    print(f"🔧 Bearbeite: {in_file}")
-    log.write(f"🔧 Bearbeite: {in_file}\n"); log.flush()
+    print(f"\n🔧 Bearbeite: {in_file}")
 
-    # STL importieren
-    bpy.ops.import_mesh.stl(filepath=in_file)
-    obj = bpy.context.selected_objects[0]
+    log.write(f"\n🔧 Bearbeite: {in_file}\n")
+
+    log.flush()
+
+    # -----------------------------------------------------
+    # STL IMPORT
+    # -----------------------------------------------------
+
+    bpy.ops.wm.stl_import(filepath=in_file)
+
+    imported_objects = bpy.context.selected_objects
+
+    if not imported_objects:
+        raise Exception("Keine Objekte importiert")
+
+    obj = imported_objects[0]
+
+    if obj.type != "MESH":
+        raise Exception("Importiertes Objekt ist kein MESH")
+
     bpy.context.view_layer.objects.active = obj
 
-    # Prüfen ob Mesh vorhanden
-    if not obj.data or obj.type != 'MESH':
-        print(f"❌ {in_file} enthält keine Geometrie")
-        log.write(f"❌ {in_file} enthält keine Geometrie\n\n"); log.flush()
-        bpy.ops.object.delete()
-        return
+    # -----------------------------------------------------
+    # EDIT MODE AKTIVIEREN
+    # -----------------------------------------------------
 
-    # In Edit Mode wechseln
-    bpy.ops.object.mode_set(mode='EDIT')
-    bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.object.mode_set(mode="EDIT")
 
-    # 1. Doppelte Vertices verschmelzen
+    bpy.ops.mesh.select_all(action="SELECT")
+
+    # -----------------------------------------------------
+    # 1. DOPPELTE VERTICES ENTFERNEN
+    # -----------------------------------------------------
+
     try:
-        bpy.ops.mesh.remove_doubles()
-        print("  - remove_doubles ok")
-        log.write("  - remove_doubles ok\n"); log.flush()
-    except:
-        print("  - remove_doubles fehlgeschlagen")
-        log.write("  - remove_doubles fehlgeschlagen\n"); log.flush()
+        bpy.context.view_layer.objects.active = obj
 
-    # 2. Non-Manifold prüfen und ggf. füllen
+        bpy.ops.object.mode_set(mode="EDIT")
+
+        bpy.ops.mesh.select_all(action="SELECT")
+
+        bpy.ops.mesh.merge_by_distance()
+
+        print("  ✓ merge_by_distance ok")
+
+        log.write("  ✓ merge_by_distance ok\n")
+
+        log.flush()
+
+    except Exception as e:
+        print(f"  ❌ merge_by_distance Fehler: {e}")
+
+        log.write(f"  ❌ merge_by_distance Fehler: {e}\n")
+
+        log.flush()
+
+    # -----------------------------------------------------
+    # OBJECT MODE
+    # -----------------------------------------------------
+
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+    # -----------------------------------------------------
+    # 2. NON MANIFOLD CHECK
+    # -----------------------------------------------------
+
     non_manifold_count = has_non_manifold(obj)
-    if non_manifold_count > 0:
-        print(f"  - {non_manifold_count} Non-Manifold-Kanten gefunden")
-        log.write(f"  - {non_manifold_count} Non-Manifold-Kanten gefunden\n"); log.flush()
 
-        bpy.ops.object.mode_set(mode='EDIT')
+    if non_manifold_count > 0:
+        print(f"  ⚠ {non_manifold_count} Non-Manifold-Edges gefunden")
+
+        log.write(f"  ⚠ {non_manifold_count} Non-Manifold-Edges gefunden\n")
+
+        log.flush()
+
+        bpy.context.view_layer.objects.active = obj
+
+        bpy.ops.object.mode_set(mode="EDIT")
+
+        bpy.ops.mesh.select_all(action="DESELECT")
+
         bpy.ops.mesh.select_non_manifold()
+
+        # -------------------------------------------------
+        # Löcher füllen
+        # -------------------------------------------------
+
         try:
             bpy.ops.mesh.fill()
-            print("  - fill ok")
-            log.write("  - fill ok\n"); log.flush()
-        except:
-            print("  - fill übersprungen (keine passenden Edges)")
-            log.write("  - fill übersprungen (keine passenden Edges)\n"); log.flush()
-        bpy.ops.object.mode_set(mode='OBJECT')
+
+            print("  ✓ fill ok")
+
+            log.write("  ✓ fill ok\n")
+
+            log.flush()
+
+        except Exception as e:
+            print(f"  ❌ fill Fehler: {e}")
+
+            log.write(f"  ❌ fill Fehler: {e}\n")
+
+            log.flush()
+
     else:
-        print("  - keine Non-Manifold-Kanten gefunden")
-        log.write("  - keine Non-Manifold-Kanten gefunden\n"); log.flush()
+        print("  ✓ Keine Non-Manifold-Edges")
 
-    # 3. STL exportieren (nur dieses Objekt!)
+        log.write("  ✓ Keine Non-Manifold-Edges\n")
+
+        log.flush()
+
+    # -----------------------------------------------------
+    # OBJECT MODE
+    # -----------------------------------------------------
+
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+    # -----------------------------------------------------
+    # 3. STL EXPORT
+    # -----------------------------------------------------
+
     try:
-        bpy.ops.object.select_all(action='DESELECT')
-        obj.select_set(True)
-        bpy.context.view_layer.objects.active = obj
-        bpy.ops.export_mesh.stl(filepath=out_file, use_selection=True)
-        print(f"✅ Exportiert nach: {out_file}")
-        log.write(f"✅ Exportiert nach: {out_file}\n\n"); log.flush()
-    except:
-        print("❌ Export fehlgeschlagen")
-        log.write("❌ Export fehlgeschlagen\n\n"); log.flush()
+        bpy.ops.object.select_all(action="DESELECT")
 
-    # 4. Objekt löschen, Szene bleibt leer
+        obj.select_set(True)
+
+        bpy.context.view_layer.objects.active = obj
+
+        bpy.ops.wm.stl_export(filepath=out_file, export_selected_objects=True)
+
+        print(f"✅ Exportiert: {out_file}")
+
+        log.write(f"✅ Exportiert: {out_file}\n")
+
+        log.flush()
+
+    except Exception as e:
+        print(f"❌ Export Fehler: {e}")
+
+        log.write(f"❌ Export Fehler: {e}\n")
+
+        log.flush()
+
+    # -----------------------------------------------------
+    # OBJEKT LÖSCHEN
+    # -----------------------------------------------------
+
+    bpy.ops.object.select_all(action="DESELECT")
+
+    obj.select_set(True)
+
+    bpy.context.view_layer.objects.active = obj
+
     bpy.ops.object.delete()
 
-# ==== Batchlauf ====
-with open(log_file, "w", encoding="utf-8") as log:
-    for filename in os.listdir(input_folder):
-        if filename.lower().endswith(".stl"):
-            in_file = os.path.join(input_folder, filename)
-            # neuen Dateinamen mit Suffix "_fixed.stl"
-            base, ext = os.path.splitext(filename)
-            fixed_name = base + "_fixed" + ext
-            out_file = os.path.join(output_folder, fixed_name)
-            try:
-                repair_stl(in_file, out_file, log)
-            except Exception as e:
-                print(f"❌ Fehler bei {filename}: {e}")
-                log.write(f"❌ Fehler bei {filename}: {e}\n\n"); log.flush()
 
-print(f"\nBatch-Fix abgeschlossen. Logfile: {log_file}")
+# =========================================================
+# BATCH RUN
+# =========================================================
+
+with open(log_file, "w", encoding="utf-8") as log:
+    stl_files = [f for f in os.listdir(input_folder) if f.lower().endswith(".stl")]
+
+    print(f"\n📦 {len(stl_files)} STL-Dateien gefunden\n")
+
+    for filename in stl_files:
+        in_file = os.path.join(input_folder, filename)
+
+        base, ext = os.path.splitext(filename)
+
+        fixed_name = base + "_fixed" + ext
+
+        out_file = os.path.join(output_folder, fixed_name)
+
+        try:
+            repair_stl(in_file, out_file, log)
+
+        except Exception as e:
+            print(f"\n❌ Fehler bei {filename}: {e}")
+
+            log.write(f"\n❌ Fehler bei {filename}: {e}\n")
+
+            log.flush()
+
+print("\n🎉 Batch-Fix abgeschlossen")
+
+print(f"📄 Logfile: {log_file}")
