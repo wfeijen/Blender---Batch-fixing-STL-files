@@ -23,7 +23,7 @@ os.makedirs(output_folder, exist_ok=True)
 log_file = os.path.join(output_folder, "repair_log.txt")
 
 # =========================================================
-# NON MANIFOLD CHECK
+# NON-MANIFOLD CHECK
 # =========================================================
 
 
@@ -45,14 +45,34 @@ def has_non_manifold(obj):
 
 
 # =========================================================
-# STL REPAIR
+# REMOVE DOUBLES VIA BMESH
+# =========================================================
+
+
+def remove_doubles_bmesh(obj, distance=0.0001):
+
+    bpy.context.view_layer.objects.active = obj
+
+    bpy.ops.object.mode_set(mode="EDIT")
+
+    bm = bmesh.from_edit_mesh(obj.data)
+
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=distance)
+
+    bmesh.update_edit_mesh(obj.data)
+
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+
+# =========================================================
+# REPAIR STL
 # =========================================================
 
 
 def repair_stl(in_file, out_file, log):
 
     # -----------------------------------------------------
-    # Szene leeren
+    # SCENE CLEANUP
     # -----------------------------------------------------
 
     bpy.ops.object.select_all(action="SELECT")
@@ -84,47 +104,27 @@ def repair_stl(in_file, out_file, log):
     bpy.context.view_layer.objects.active = obj
 
     # -----------------------------------------------------
-    # EDIT MODE AKTIVIEREN
-    # -----------------------------------------------------
-
-    bpy.ops.object.mode_set(mode="EDIT")
-
-    bpy.ops.mesh.select_all(action="SELECT")
-
-    # -----------------------------------------------------
-    # 1. DOPPELTE VERTICES ENTFERNEN
+    # REMOVE DOUBLES
     # -----------------------------------------------------
 
     try:
-        bpy.context.view_layer.objects.active = obj
+        remove_doubles_bmesh(obj)
 
-        bpy.ops.object.mode_set(mode="EDIT")
+        print("  ✓ remove_doubles ok")
 
-        bpy.ops.mesh.select_all(action="SELECT")
-
-        bpy.ops.mesh.merge_by_distance()
-
-        print("  ✓ merge_by_distance ok")
-
-        log.write("  ✓ merge_by_distance ok\n")
+        log.write("  ✓ remove_doubles ok\n")
 
         log.flush()
 
     except Exception as e:
-        print(f"  ❌ merge_by_distance Fehler: {e}")
+        print(f"  ❌ remove_doubles Fehler: {e}")
 
-        log.write(f"  ❌ merge_by_distance Fehler: {e}\n")
+        log.write(f"  ❌ remove_doubles Fehler: {e}\n")
 
         log.flush()
 
     # -----------------------------------------------------
-    # OBJECT MODE
-    # -----------------------------------------------------
-
-    bpy.ops.object.mode_set(mode="OBJECT")
-
-    # -----------------------------------------------------
-    # 2. NON MANIFOLD CHECK
+    # NON-MANIFOLD CHECK
     # -----------------------------------------------------
 
     non_manifold_count = has_non_manifold(obj)
@@ -145,7 +145,7 @@ def repair_stl(in_file, out_file, log):
         bpy.ops.mesh.select_non_manifold()
 
         # -------------------------------------------------
-        # Löcher füllen
+        # HOLES FILL
         # -------------------------------------------------
 
         try:
@@ -164,6 +164,8 @@ def repair_stl(in_file, out_file, log):
 
             log.flush()
 
+        bpy.ops.object.mode_set(mode="OBJECT")
+
     else:
         print("  ✓ Keine Non-Manifold-Edges")
 
@@ -172,13 +174,7 @@ def repair_stl(in_file, out_file, log):
         log.flush()
 
     # -----------------------------------------------------
-    # OBJECT MODE
-    # -----------------------------------------------------
-
-    bpy.ops.object.mode_set(mode="OBJECT")
-
-    # -----------------------------------------------------
-    # 3. STL EXPORT
+    # STL EXPORT
     # -----------------------------------------------------
 
     try:
@@ -204,7 +200,7 @@ def repair_stl(in_file, out_file, log):
         log.flush()
 
     # -----------------------------------------------------
-    # OBJEKT LÖSCHEN
+    # DELETE OBJECT
     # -----------------------------------------------------
 
     bpy.ops.object.select_all(action="DESELECT")
